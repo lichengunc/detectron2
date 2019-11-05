@@ -9,6 +9,11 @@ mkdir -p genome
 mkdir -p genome/image_splits
 mkdir -p genome/1600-400-20
 
+# download karpathy's image_ids
+wget https://raw.githubusercontent.com/peteanderson80/bottom-up-attention/master/data/genome/coco_splits/karpathy_train_images.txt -P genome/image_splits
+wget https://raw.githubusercontent.com/peteanderson80/bottom-up-attention/master/data/genome/coco_splits/karpathy_val_images.txt -P genome/image_splits
+wget https://raw.githubusercontent.com/peteanderson80/bottom-up-attention/master/data/genome/coco_splits/karpathy_test_images.txt -P genome/image_splits
+
 # download image_ids
 wget https://raw.githubusercontent.com/peteanderson80/bottom-up-attention/master/data/genome/train.txt -P genome/image_splits
 wget https://raw.githubusercontent.com/peteanderson80/bottom-up-attention/master/data/genome/val.txt -P genome/image_splits

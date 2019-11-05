@@ -18,6 +18,7 @@ vg_dir = osp.join(data_dir, 'vg')
 coco_dir = osp.join(data_dir, 'coco')
 refer_dir = osp.join(data_dir, 'refer')
 flickr_dir = osp.join(data_dir, 'flickr30k')
+genome_dir = osp.join(data_dir, 'genome')
 
 # Excluded refcoco*'s val+test images
 refcoco_data = pickle.load(
@@ -46,7 +47,7 @@ print(f'- There are {len(refer_test_coco_iids_set)} refcoco_unc + refcocog_umd '
 # Load Karpathy's minival (a subset of COCO's val)
 karpathy_train_iids = []
 karpathy_train_file = open(
-    osp.join(coco_dir, 'karpathy_splits', 'karpathy_train_images.txt'), 'r')
+    osp.join(genome_dir, 'image_splits', 'karpathy_train_images.txt'), 'r')
 for x in karpathy_train_file.readlines():
     karpathy_train_iids.append(int(x.split()[1]))
 karpathy_train_set = set(karpathy_train_iids)
@@ -55,7 +56,7 @@ print('COCO\'s [karpathy_train] %s images loaded.' % len(karpathy_train_set))
 
 karpathy_val_iids = []
 karpathy_val_file = open(
-    osp.join(coco_dir, 'karpathy_splits', 'karpathy_val_images.txt'), 'r')
+    osp.join(genome_dir, 'image_splits', 'karpathy_val_images.txt'), 'r')
 f = karpathy_val_file.readlines()
 for x in f:
     karpathy_val_iids.append(int(x.split()[1]))
@@ -65,7 +66,7 @@ print('COCO\'s [karpathy_val] %s images loaded.' % len(karpathy_val_set))
 
 karpathy_test_iids = []
 karpathy_test_file = open(
-    osp.join(coco_dir, 'karpathy_splits', 'karpathy_test_images.txt'), 'r')
+    osp.join(genome_dir, 'image_splits', 'karpathy_test_images.txt'), 'r')
 f = karpathy_test_file.readlines()
 for x in f:
     karpathy_test_iids.append(int(x.split()[1]))
