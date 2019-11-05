@@ -1,15 +1,24 @@
-''' Visual genome data analysis and preprocessing.'''
+''' 
+Visual genome data analysis and preprocessing.
+
+We basically follow: 
+https://github.com/peteanderson80/bottom-up-attention/blob/master/data/genome/setup_vg.py
+
+Run "prepare_for_genome.sh" first.
+'''
 import json
 import os
 import os.path as osp
 import operator
 from collections import Counter, defaultdict
 import argparse
+import xml.etree.cElementTree as ET
+from xml.dom import minidom
 
-# Set common attributes
+
 common_attributes = set(['white','black','blue','green','red','brown','yellow',
     'small','large','silver','wooden','orange','gray','grey','metal','pink',
-    'tall','long','dark'])
+    'tall', 'long','dark'])
 
 """
 Add attributes to `scene_graph.json`, extracted from `attributes.json`.
@@ -33,7 +42,7 @@ def SceneGraphsWithAttrs(dataDir='datasets/vg'):
         iid = img_attrs['image_id']
         sg_dict[iid]['attributes'] = attrs
     
-    return sg_dict.values()
+    return list(sg_dict.values())
 
 def clean_string(string):
     string = string.lower().strip()
@@ -72,7 +81,7 @@ def clean_relations(string):
     else:
         return []
 
-def build_vocabs(args):
+def build_vocabs_and_xml(args):
     objects = Counter()
     attributes = Counter()
     relations = Counter()
@@ -99,6 +108,27 @@ def build_vocabs(args):
             objects.update(o)
             attributes.update(a)
 
+    with open(osp.join(args.output_dir, 'objects_count.txt'), 
+              'w') as text_file:
+        for k,v in sorted(objects.items(), 
+                          key=operator.itemgetter(1), 
+                          reverse=True):
+            text_file.write("%s\t%d\n" % (k.encode('utf-8'),v))
+
+    with open(osp.join(args.output_dir, 'attributes_count.txt'), 
+              'w') as text_file:
+        for k,v in sorted(attributes.items(), 
+                          key=operator.itemgetter(1), 
+                          reverse=True):
+            text_file.write("%s\t%d\n" % (k.encode('utf-8'),v))
+
+    with open(osp.join(args.output_dir, "relations_count.txt"), 
+              'w') as text_file:
+        for k,v in sorted(relations.items(), 
+                          key=operator.itemgetter(1), 
+                          reverse=True):
+            text_file.write("%s\t%d\n" % (k.encode('utf-8'),v))
+
     # Create full-sized vocabs
     objects = set([k for k,v in objects.most_common(args.max_objects)])
     attributes = set([k for k,v in attributes.most_common(args.max_attributes)])
@@ -121,15 +151,91 @@ def build_vocabs(args):
         'w') as txt_file:
         for item in relations:
             txt_file.write(f'{item}\n')
+    
+    # Load image metadata
+    metadata = {}
+    with open(osp.join(args.data_dir, 'image_data.json')) as f:
+        for item in json.load(f):
+            metadata[item['image_id']] = item
+
+    # Output clean xml files, one per image
+    out_folder = 'xml'
+    if not osp.exists(osp.join(args.output_dir, out_folder)):
+        os.mkdir(osp.join(args.output_dir, out_folder))
+    for sg in data:
+        ann = ET.Element("annotation")
+        meta = metadata[sg["image_id"]]
+        assert sg["image_id"] == meta["image_id"]
+        url_split = meta["url"].split("/")
+        ET.SubElement(ann, "folder").text = url_split[-2]
+        ET.SubElement(ann, "filename").text = url_split[-1]
+
+        source = ET.SubElement(ann, "source")
+        ET.SubElement(source, "database").text = "Visual Genome Version 1.2"
+        ET.SubElement(source, "image_id").text = str(meta["image_id"])
+        ET.SubElement(source, "coco_id").text = str(meta["coco_id"])
+        ET.SubElement(source, "flickr_id").text = str(meta["flickr_id"])
+
+        size = ET.SubElement(ann, "size")
+        ET.SubElement(size, "width").text = str(meta["width"])
+        ET.SubElement(size, "height").text = str(meta["height"])
+        ET.SubElement(size, "depth").text = "3"
+
+        ET.SubElement(ann, "segmented").text = "0"
+
+
+        object_set = set()
+        for obj in sg['objects']:
+            o,a = clean_objects(obj['names'][0], common_attributes)
+            if o[0] in objects:
+                ob = ET.SubElement(ann, "object")
+                ET.SubElement(ob, "name").text = o[0]
+                ET.SubElement(ob, "object_id").text = str(obj["object_id"])
+                object_set.add(obj["object_id"])
+                ET.SubElement(ob, "difficult").text = "0"
+                bbox = ET.SubElement(ob, "bndbox")
+                ET.SubElement(bbox, "xmin").text = str(obj["x"])
+                ET.SubElement(bbox, "ymin").text = str(obj["y"])
+                ET.SubElement(bbox, "xmax").text = str(obj["x"] + obj["w"])
+                ET.SubElement(bbox, "ymax").text = str(obj["y"] + obj["h"])
+                attribute_set = set()
+                for attribute_name in a:
+                    if attribute_name in attributes:
+                        attribute_set.add(attribute_name)
+                for attr in sg['attributes']:
+                    if attr["attribute"]["object_id"] == obj["object_id"]:
+                        try:
+                            for ix in attr['attribute']['attributes']:
+                                for clean_attribute in clean_attributes(ix):
+                                    if clean_attribute in attributes:
+                                        attribute_set.add(clean_attribute)
+                        except:
+                            pass
+                for attribute_name in attribute_set:
+                    ET.SubElement(ob, "attribute").text = attribute_name
+
+        for rel in sg['relationships']:
+            predicate = clean_string(rel["predicate"])
+            if rel["subject_id"] in object_set and rel["object_id"] in object_set:
+                if predicate in relations:
+                    re = ET.SubElement(ann, "relation")
+                    ET.SubElement(re, "subject_id").text = str(rel["subject_id"])
+                    ET.SubElement(re, "object_id").text = str(rel["object_id"])
+                    ET.SubElement(re, "predicate").text = predicate
+
+        outFile = url_split[-1].replace(".jpg",".xml")
+        tree = ET.ElementTree(ann)
+        if len(tree.findall('object')) > 0:
+            tree.write(osp.join(args.output_dir, out_folder, outFile))
 
 
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_dir', type=str, default='datasets/vg')
-    parser.add_argument('--max_objects', type=int, default=1600)
-    parser.add_argument('--max_attributes', type=int, default=400)
-    parser.add_argument('--max_relations', type=int, default=200)
-    parser.add_argument('--output_dir', type=str, default='datasets/prepro')
+    parser.add_argument('--max_objects', type=int, default=2500)
+    parser.add_argument('--max_attributes', type=int, default=1000)
+    parser.add_argument('--max_relations', type=int, default=500)
+    parser.add_argument('--output_dir', type=str, default='datasets/genome')
     args = parser.parse_args()
-    build_vocabs(args)
+    build_vocabs_and_xml(args)

@@ -124,7 +124,7 @@ output = {'refer_val_coco_iids': list(refer_val_coco_iids_set),
           'karpathy_train_iids': list(karpathy_train_iids),
           'karpathy_val_iids': list(karpathy_val_iids), 
           'karpathy_test_iids': list(karpathy_test_iids)}
-if not osp.isdir('datasets/prepro'): os.makedirs('datasets/prepro')
-with open('datasets/prepro/excluded_coco_vg_iids.json', 'w') as f:
+if not osp.isdir('datasets/genome'): os.makedirs('datasets/genome')
+with open('datasets/genome/excluded_coco_vg_iids.json', 'w') as f:
     json.dump(output, f)
-print('datasets/prepro/excluded_coco_vg_iids.json saved.')
+print('datasets/genome/excluded_coco_vg_iids.json saved.')
