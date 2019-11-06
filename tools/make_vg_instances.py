@@ -87,6 +87,15 @@ class vg():
 
     def _annotation_xml_path(self, index):
         return os.path.join(self.genome_dir, 'xml', str(index) + '.xml')
+    
+    def load_vg_images(self):
+        """
+        Select image meta from filtered image_index
+        """
+        images = []
+        for index in self._image_index:
+            images.append(self.iid_to_meta[index])
+        return images
 
     def load_vg_annotations(self):
         """
@@ -193,9 +202,9 @@ if __name__ == '__main__':
 
     # make instances
     for split in ['train', 'val', 'test']:
-        
+
         dataset = vg(args.genome_dir, args.vocab_dir, split, args.filter)
-        images = dataset.image_data[split]
+        images = dataset.load_vg_images()
         annotations = dataset.load_vg_annotations()
         categories = dataset.load_vg_categories()
         attributes = dataset.load_vg_attributes()
