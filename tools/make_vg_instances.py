@@ -155,16 +155,24 @@ class vg():
 
     def load_vg_categories(self):
         categories = []
+        cls_ids = set()  # multiple names -> same cls_id, we only use one
         for obj_cls, cls_id in self._class_to_ind.items():
+            if cls_id in cls_ids:
+                continue
             cat = {'name': obj_cls, 'id': cls_id}
             categories.append(cat)
+            cls_ids.add(cls_id)
         return categories
 
     def load_vg_attributes(self):
         attributes = []
+        cls_ids = set()  # multiple names -> same cls_id, we only use one
         for att_cls, cls_id in self._attribute_to_ind.items():
+            if cls_id in cls_ids:
+                continue
             att = {'name': att_cls, 'id': cls_id}
             attributes.append(att)
+            cls_ids.add(cls_id)
         return attributes
 
 
