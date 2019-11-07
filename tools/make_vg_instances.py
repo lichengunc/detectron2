@@ -5,9 +5,11 @@ import numpy as np
 import json
 import argparse 
 import time
+import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 class vg():
-    def __init__(self, genome_dir, vocab_dir, image_set, filter):
+    def __init__(self, image_root, genome_dir, vocab_dir, image_set, filter):
 
         # image_data = {split: [{id, file_name, coco_id, flickr_id, height, width}]}
         image_data_path = osp.join(genome_dir, 'image_data.json') if not filter \
@@ -16,6 +18,7 @@ class vg():
         self.iid_to_meta = {img['id']: img for img in self.image_data[image_set]}
 
         # other directories
+        self.image_root = image_root
         self.vocab_dir = vocab_dir
         self.genome_dir = genome_dir
         self._image_set = image_set
@@ -92,9 +95,20 @@ class vg():
         """
         Select image meta from filtered image_index
         """
+        size_miss_match = 0
         images = []
-        for index in self._image_index:
-            images.append(self.iid_to_meta[index])
+        for index in tqdm(self._image_index):
+            img = self.iid_to_meta[index]
+            im = plt.imread(osp.join(self.image_root, img['file_name']))
+            h, w = im.shape[0], im.shape[1]
+            if img['width'] != w or img['height'] != h:
+                size_miss_match += 1
+                print('Missmatched img_id[%s], expected_wh[%s,%s], real_wh[%s,%s]' \
+                      % (img['id'], img['width'], img['height'], w, h))
+                img['height'] = h
+                img['width'] = w
+            images.append(img)
+        print(f'{size_miss_match} images\' sizes are fixed.')
         return images
 
     def load_vg_annotations(self):
@@ -153,6 +167,7 @@ class vg():
                         'image_id': index,
                         'bbox': bbox,
                         'attribute_ids': att_class_ids,
+                        'iscrowd': False
                     }
                     annotations.append(ann)
                     # next anno
@@ -188,6 +203,8 @@ class vg():
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
+    parser.add_argument('--image_root', type=str,
+                        default='datasets/vg')
     parser.add_argument('--genome_dir', type=str, 
                         default='datasets/genome')
     parser.add_argument('--vocab_dir', type=str, 
@@ -203,7 +220,8 @@ if __name__ == '__main__':
     # make instances
     for split in ['train', 'val', 'test']:
 
-        dataset = vg(args.genome_dir, args.vocab_dir, split, args.filter)
+        dataset = vg(args.image_root, args.genome_dir, args.vocab_dir, split, 
+                     args.filter)
         images = dataset.load_vg_images()
         annotations = dataset.load_vg_annotations()
         categories = dataset.load_vg_categories()
