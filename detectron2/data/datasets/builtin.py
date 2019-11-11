@@ -20,11 +20,32 @@ To add new dataset, refer to the tutorial "docs/DATASETS.md".
 import os
 
 from detectron2.data import MetadataCatalog, DatasetCatalog
+from .genome import register_genome_instances
 from .register_coco import register_coco_instances, register_coco_panoptic_separated
 from .lvis import register_lvis_instances, get_lvis_instances_meta
 from .cityscapes import load_cityscapes_instances, load_cityscapes_semantic
 from .pascal_voc import register_pascal_voc
 from .builtin_meta import _get_builtin_metadata
+
+
+# ==== Predefined datasets and splits for Genome ==========
+_PREDEFINED_SPLITS_GENOME = {
+    "genome_train": ("vg", "genome/annotations/instances_train.json"),
+    "filtered_genome_train": ("vg", "genome/annotations/filtered_instances_train.json"),
+    "genome_val": ("vg", "genome/annotations/instances_val.json"),
+    "filtered_genome_val": ("vg", "genome/annotations/filtered_instances_val.json"),
+    "genome_test": ("vg", "genome/annotations/instances_test.json"),
+    "filtered_genome_test": ("vg", "genome/annotations/filtered_instances_test.json")
+}
+
+def register_all_genome(root="datasets"):
+    for key, (image_root, json_file) in _PREDEFINED_SPLITS_GENOME.items():
+        # Assume pre-defined datasets live in `./datasets`.
+        register_genome_instances(
+            key,
+            os.path.join(root, json_file) if "://" not in json_file else json_file,
+            os.path.join(root, image_root),
+        )
 
 
 # ==== Predefined datasets and splits for COCO ==========
@@ -211,3 +232,4 @@ register_all_coco()
 register_all_lvis()
 register_all_cityscapes()
 register_all_pascal_voc()
+register_all_genome()
