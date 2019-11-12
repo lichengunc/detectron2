@@ -68,7 +68,7 @@ class Trainer(DefaultTrainer):
                     output_dir=output_folder,
                 )
             )
-        if evaluator_type in ["coco", "coco_panoptic_seg"]:
+        if evaluator_type in ["coco", "coco_panoptic_seg", "genome"]:
             evaluator_list.append(COCOEvaluator(dataset_name, cfg, True, output_folder))
         if evaluator_type == "coco_panoptic_seg":
             evaluator_list.append(COCOPanopticEvaluator(dataset_name, output_folder))

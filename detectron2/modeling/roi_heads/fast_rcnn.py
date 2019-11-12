@@ -350,3 +350,65 @@ class FastRCNNOutputLayers(nn.Module):
         scores = self.cls_score(x)
         proposal_deltas = self.bbox_pred(x)
         return scores, proposal_deltas
+
+
+class FastRCNNOutputLayersWithAtt(nn.Module):
+    """
+    Two linear layers for predicting Fast R-CNN outputs:
+      (1) proposal-to-detection box regression deltas
+      (2) object classification scores
+      (e) attribute classification scores
+    """
+
+    def __init__(self, input_size, num_classes, cls_embedding_dim, 
+                       num_attributes, att_embedding_dim,
+                       cls_agnostic_bbox_reg, box_dim=4):
+        """
+        Args:
+            input_size (int): channels, or (channels, height, width)
+            num_classes (int): number of foreground classes
+            cls_agnostic_bbox_reg (bool): whether to use class agnostic for bbox regression
+            box_dim (int): the dimension of bounding boxes.
+                Example box dimensions: 4 for regular XYXY boxes and 5 for rotated XYWHA boxes
+        """
+        super(FastRCNNOutputLayersWithAtt, self).__init__()
+
+        if not isinstance(input_size, int):
+            input_size = np.prod(input_size)
+
+        # The prediction layer for num_classes foreground classes and one background class
+        # (hence + 1)
+        self.cls_score = nn.Linear(input_size, num_classes + 1)
+        num_bbox_reg_classes = 1 if cls_agnostic_bbox_reg else num_classes
+        self.bbox_pred = nn.Linear(input_size, num_bbox_reg_classes * box_dim)
+
+        # Attribute branch
+        self.cls_embed = nn.Linear(num_classes + 1, cls_embedding_dim)
+        self.att_embed = nn.Linear(input_size + cls_embedding_dim, att_embedding_dim)
+        self.att_score = nn.Linear(att_embedding_dim, num_attributes + 1)
+
+        # initialize
+        nn.init.normal_(self.cls_score.weight, std=0.01)
+        nn.init.normal_(self.bbox_pred.weight, std=0.001)
+        nn.init.normal_(self.cls_embed.weight, std=0.01)
+        nn.init.normal_(self.att_embed.weight, std=0.01)
+        nn.init.normal_(self.att_score.weight, std=0.01)
+        for l in [self.cls_score, self.bbox_pred, 
+                  self.cls_embed, self.att_embed, 
+                  self.att_score]:
+            nn.init.constant_(l.bias, 0)
+
+    def forward(self, x):
+        if x.dim() > 2:
+            x = torch.flatten(x, start_dim=1)
+        scores = self.cls_score(x)
+        proposal_deltas = self.bbox_pred(x)
+
+        # attribute branch
+        cls_emb = self.cls_embed(scores)
+        concat_pool5 = torch.cat([cls_emb, x], dim=-1)  # (n, input_size + cls_embedding_dim)
+        att_emb = self.att_embed(concat_pool5)  # (n, att_embedding_dim)
+        att_scores = self.att_score(F.relu(att_emb))  # (n, #attrs + 1)
+
+        # return
+        return scores, proposal_deltas, att_scores

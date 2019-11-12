@@ -166,6 +166,7 @@ class vg():
                         'category_id': self._class_to_ind[obj_name],
                         'image_id': index,
                         'bbox': bbox,
+                        'area': bbox[2] * bbox[3],  # we use bbox area not mask area
                         'attribute_ids': att_class_ids,
                         'iscrowd': False
                     }
