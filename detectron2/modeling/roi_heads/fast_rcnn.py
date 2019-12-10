@@ -3,6 +3,7 @@ import logging
 import numpy as np
 import torch
 from fvcore.nn import smooth_l1_loss
+import torch
 from torch import nn
 from torch.nn import functional as F
 
@@ -352,12 +353,146 @@ class FastRCNNOutputLayers(nn.Module):
         return scores, proposal_deltas
 
 
-class FastRCNNOutputLayersWithAtt(nn.Module):
+# ========================================================
+# FastRCNNOutput and FastRCNNOutputLayers + Attributes
+# ========================================================
+class FastRCNNOutputsWithAttr(FastRCNNOutputs):
+    """
+    A class that stores information about outputs of a Fast R-CNN head.
+    """
+
+    def __init__(
+        self, box2box_transform, 
+        pred_class_logits, pred_proposal_deltas, pred_attr_logits,
+        proposals, smooth_l1_beta, attribute_loss_type
+    ):
+        """
+        Args:
+            box2box_transform (Box2BoxTransform/Box2BoxTransformRotated):
+                box2box transform instance for proposal-to-detection transformations.
+            pred_class_logits (Tensor): A tensor of shape (R, K + 1) storing the predicted class
+                logits for all R predicted object instances.
+                Each row corresponds to a predicted object instance.
+            pred_proposal_deltas (Tensor): A tensor of shape (R, K * B) or (R, B) for
+                class-specific or class-agnostic regression. It stores the predicted deltas that
+                transform proposals into final box detections.
+                B is the box dimension (4 or 5).
+                When B is 4, each row is [dx, dy, dw, dh (, ....)].
+                When B is 5, each row is [dx, dy, dw, dh, da (, ....)].
+            pred_attr_logits (Tensor): A tensor of shape (R, num_attrirbutes) storing the 
+                predicted attribute logits for all R predicted object instances.
+            proposals (list[Instances]): A list of N Instances, where Instances i stores the
+                proposals for image i, in the field "proposal_boxes".
+                When training, each Instances must have ground-truth labels
+                stored in the field "gt_classes" and "gt_boxes".
+            smooth_l1_beta (float): The transition point between L1 and L2 loss in
+                the smooth L1 loss function. When set to 0, the loss becomes L1. When
+                set to +inf, the loss becomes constant 0.
+            attribute_loss_type: softmax or multiclass
+        """
+        # initialize everything from FastRCNNOutputs 
+        super(FastRCNNOutputsWithAttr, self).__init__(
+            box2box_transform, pred_class_logits, pred_proposal_deltas,
+            proposals, smooth_l1_beta
+        )
+
+        # initialize attribute part
+        self.pred_attr_logits = pred_attr_logits  # strictly it is just scores.
+        self.attribute_loss_type = attribute_loss_type
+
+        if proposals[0].has("gt_attributes"):
+            """
+            Each proposal's gt_attributes is [attr_id] with variable length.
+            Convert each to be (num_attributes, ) with indices {0, 1}.
+            """
+            # num_regions, num_attributes = pred_attr_logits.size()
+            # self.gt_attributes = self.gt_boxes.tensor.new_zeros(num_regions, num_attributes)
+            # for i, p in enumerate(proposals):
+            #     self.gt_attributes[i, p.gt_attributes] = 1.
+            self.gt_attributes = cat([p.gt_attributes for p in proposals], dim=0)
+
+    def softmax_attribute_loss(self):
+        """
+        Compute the softmax cross entropy loss for attribute classification.
+        We will use soft labels instead.
+        """
+        idx = self.gt_attributes.sum(1) > 0  # select those with attributes
+        if self.pred_attr_logits[idx].numel() == 0:
+            # fake a meaningless loss to avoid unused params
+            loss = self.pred_attr_logits.sum() * 0
+        else:
+            pred = self.pred_attr_logits[idx].log_softmax(dim=-1)  # (r, num_attributes)
+            tgt = self.gt_attributes[idx]        # (r, num_attributes)
+            tgt = tgt / tgt.sum(1).unsqueeze(1)  # label smoothing
+            loss = torch.mean(torch.sum(-tgt * pred, dim=-1))
+        return loss
+    
+    def multi_class_attribute_loss(self):
+        """
+        Compute binary cross entropy loss on each attribute of each region.
+        """
+        idx = self.gt_attributes.sum(1) > 0  # selet those with attributes
+        if self.pred_attr_logits[idx].numel() == 0:
+            # fake a meaningless loss to avoid unused params
+            loss = self.pred_attr_logits.sum() * 0
+        else:
+            pred = self.pred_attr_logits[idx]    # (r, num_attributes)
+            tgt = self.gt_attributes[idx]        # (r, num_attributes)
+            loss = F.binary_cross_entropy_with_logits(pred, tgt, reduction='mean')
+        return loss
+    
+    def losses(self):
+        losses = {
+            "loss_cls": self.softmax_cross_entropy_loss(),
+            "loss_box_reg": self.smooth_l1_loss(),
+        }
+        if self.attribute_loss_type == 'softmax':
+            losses['loss_attr_softmax'] = self.softmax_attribute_loss()
+        elif self.attribute_loss_type == 'multiclass':
+            losses['loss_attr_multicls'] = self.multi_class_attribute_loss()
+        else:
+            raise NotImplementedError
+        return losses
+    
+    def predict_attr_probs(self):
+        if self.attribute_loss_type == 'softmax':
+            probs = F.softmax(self.pred_attr_logits, dim=-1)  # (R, num_attributes)
+        elif self.attribute_loss_type == 'multiclass':
+            probs = torch.sigmoid(self.pred_attr_logits)  # (R, num_attributes)
+        return probs.split(self.num_preds_per_images, dim=0)
+    
+    def inference(self, score_thresh, nms_thresh, topk_per_image):
+        """
+        Args:
+            score_thresh (float): same as fast_rcnn_inference.
+            nms_thresh (float): same as fast_rcnn_inference.
+            topk_per_image (int): same as fast_rcnn_inference.
+        Returns:
+            list[Instances]: same as fast_rcnn_inference.
+            list[Tensor]: same as fast_rcnn_inference.
+        """
+        boxes = self.predict_boxes()
+        scores = self.predict_probs()
+        attr_probs = self.predict_attr_probs()
+        image_shapes = self.image_shapes
+
+        # the returned pred_instances are w/o attribute prediction
+        pred_instances, kept_indices = fast_rcnn_inference(
+            boxes, scores, image_shapes, score_thresh, nms_thresh, topk_per_image
+        )
+        # let's add attr_probs to each pred_instances
+        for i, pred_instance in enumerate(pred_instances):
+            pred_instance.pred_attr_probs = attr_probs[i][kept_indices[i]]
+        # return
+        return pred_instances, kept_indices
+
+
+class FastRCNNOutputLayersWithAttr(nn.Module):
     """
     Two linear layers for predicting Fast R-CNN outputs:
       (1) proposal-to-detection box regression deltas
-      (2) object classification scores
-      (e) attribute classification scores
+      (2) object classification scores (n, #classes+1)
+      (3) attribute classification scores (n, #attributes)
     """
 
     def __init__(self, input_size, num_classes, cls_embedding_dim, 
@@ -371,7 +506,7 @@ class FastRCNNOutputLayersWithAtt(nn.Module):
             box_dim (int): the dimension of bounding boxes.
                 Example box dimensions: 4 for regular XYXY boxes and 5 for rotated XYWHA boxes
         """
-        super(FastRCNNOutputLayersWithAtt, self).__init__()
+        super(FastRCNNOutputLayersWithAttr, self).__init__()
 
         if not isinstance(input_size, int):
             input_size = np.prod(input_size)
@@ -385,7 +520,7 @@ class FastRCNNOutputLayersWithAtt(nn.Module):
         # Attribute branch
         self.cls_embed = nn.Linear(num_classes + 1, cls_embedding_dim)
         self.att_embed = nn.Linear(input_size + cls_embedding_dim, att_embedding_dim)
-        self.att_score = nn.Linear(att_embedding_dim, num_attributes + 1)
+        self.att_score = nn.Linear(att_embedding_dim, num_attributes)
 
         # initialize
         nn.init.normal_(self.cls_score.weight, std=0.01)
@@ -405,10 +540,10 @@ class FastRCNNOutputLayersWithAtt(nn.Module):
         proposal_deltas = self.bbox_pred(x)
 
         # attribute branch
-        cls_emb = self.cls_embed(scores)
+        cls_emb = self.cls_embed(scores.detach())  # forbid attribute branch effecting detection
         concat_pool5 = torch.cat([cls_emb, x], dim=-1)  # (n, input_size + cls_embedding_dim)
         att_emb = self.att_embed(concat_pool5)  # (n, att_embedding_dim)
-        att_scores = self.att_score(F.relu(att_emb))  # (n, #attrs + 1)
+        att_scores = self.att_score(F.relu(att_emb))  # (n, #attrs)
 
         # return
         return scores, proposal_deltas, att_scores
