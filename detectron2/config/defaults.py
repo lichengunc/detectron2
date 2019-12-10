@@ -263,6 +263,11 @@ _C.MODEL.ROI_HEADS.NMS_THRESH_TEST = 0.5
 # train ROI heads.
 _C.MODEL.ROI_HEADS.PROPOSAL_APPEND_GT = True
 
+# Attribute Branch
+_C.MODEL.ROI_HEADS.NUM_ATTRIBUTES = 400
+_C.MODEL.ROI_HEADS.CLASS_EMBEDDING_DIM = 256
+_C.MODEL.ROI_HEADS.ATTRIBUTE_EMBEDDING_DIM = 512
+_C.MODEL.ROI_HEADS.ATTRIBUTE_LOSS_TYPE = "softmax"  # or multiclass
 
 # ---------------------------------------------------------------------------- #
 # Box Head
