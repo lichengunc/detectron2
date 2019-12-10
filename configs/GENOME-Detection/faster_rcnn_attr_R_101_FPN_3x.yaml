@@ -17,4 +17,4 @@ SOLVER:
 DATASETS:
   TRAIN: ("genome_train",)
   TEST: ("genome_val",)
-OUTPUT_DIR: "output/genome_faster_rcnn_attr_R_101_RPN_3x"
+OUTPUT_DIR: "output/genome_faster_rcnn_attr_R_101_FPN_3x"
