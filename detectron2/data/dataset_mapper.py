@@ -39,6 +39,8 @@ class DatasetMapper:
 
         self.tfm_gens = utils.build_transform_gen(cfg, is_train)
 
+        self.num_attributes = cfg.MODEL.ROI_HEADS.NUM_ATTRIBUTES
+
         # fmt: off
         self.img_format     = cfg.INPUT.FORMAT
         self.mask_on        = cfg.MODEL.MASK_ON
@@ -128,7 +130,8 @@ class DatasetMapper:
                 if obj.get("iscrowd", 0) == 0
             ]
             instances = utils.annotations_to_instances(
-                annos, image_shape, mask_format=self.mask_format
+                annos, image_shape, mask_format=self.mask_format, 
+                num_attributes=self.num_attributes
             )
             # Create a tight bounding box from masks, useful when image is cropped
             if self.crop_gen and instances.has("gt_masks"):

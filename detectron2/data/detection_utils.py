@@ -197,7 +197,7 @@ def transform_keypoint_annotations(keypoints, transforms, image_size, keypoint_h
     return keypoints
 
 
-def annotations_to_instances(annos, image_size, mask_format="polygon"):
+def annotations_to_instances(annos, image_size, mask_format="polygon", num_attributes=-1):
     """
     Create an :class:`Instances` object used by the models,
     from instance annotations in the dataset dict.
@@ -234,6 +234,14 @@ def annotations_to_instances(annos, image_size, mask_format="polygon"):
     if len(annos) and "keypoints" in annos[0]:
         kpts = [obj.get("keypoints", []) for obj in annos]
         target.gt_keypoints = Keypoints(kpts)
+
+    # for data with attributes like genome
+    if len(annos) and "attribute_ids" in annos[0]:
+        assert num_attributes > 0
+        attrs = torch.zeros(len(annos), num_attributes)
+        for i, obj in enumerate(annos):
+            attrs[i][obj['attribute_ids']] = 1.
+        target.gt_attributes = attrs   # (num_objs, num_attributes)
 
     return target
 
