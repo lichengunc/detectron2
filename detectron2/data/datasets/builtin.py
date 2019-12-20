@@ -18,6 +18,7 @@ To add new dataset, refer to the tutorial "docs/DATASETS.md".
 """
 
 import os
+import os.path as osp
 
 from detectron2.data import MetadataCatalog, DatasetCatalog
 from .genome import register_genome_instances
@@ -37,14 +38,16 @@ _PREDEFINED_SPLITS_GENOME = {
     "genome_test": ("vg", "genome/annotations/instances_test.json"),
     "filtered_genome_test": ("vg", "genome/annotations/filtered_instances_test.json")
 }
+_PREDEFINED_META_GENOME = {"meta": "genome/annotations/meta.json"}
 
-def register_all_genome(root="datasets"):
+def register_all_genome(root=osp.join(osp.dirname(__file__), '../../../datasets')):
     for key, (image_root, json_file) in _PREDEFINED_SPLITS_GENOME.items():
         # Assume pre-defined datasets live in `./datasets`.
         register_genome_instances(
             key,
             os.path.join(root, json_file) if "://" not in json_file else json_file,
             os.path.join(root, image_root),
+            os.path.join(root, _PREDEFINED_META_GENOME["meta"])
         )
 
 

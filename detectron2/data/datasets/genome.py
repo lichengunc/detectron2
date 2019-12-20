@@ -133,8 +133,25 @@ def load_genome_instances(json_file, image_root, dataset_name):
 
     return dataset_dicts
 
-def register_genome_instances(name, json_file, image_root):
+def register_genome_instances(name, json_file, image_root, meta_file):
     DatasetCatalog.register(name, lambda: load_genome_instances(json_file, image_root, name))
     MetadataCatalog.get(name).set(
         json_file=json_file, image_root=image_root, evaluator_type="genome"
     )
+    # In case DatasetCatalog is not called, we manually add additional meta info
+    meta = MetadataCatalog.get(name)
+    meta_info = json.load(open(meta_file, "r"))
+    cat_ids = sorted([c["id"] for c in meta_info["categories"]])
+    meta.thing_classes = [c["name"] for c in sorted(meta_info["categories"], 
+                                                    key=lambda x: x["id"])]
+    meta.thing_dataset_id_to_contiguous_id = {v: i for i, v in enumerate(cat_ids)}
+    att_ids = sorted([a["id"] for a in meta_info["attributes"]])
+    meta.attribute_classes = [a["name"] for a in sorted(meta_info["attributes"], 
+                                                        key=lambda x: x["id"])]
+    meta.attribute_dataset_id_to_contiguous_id = {v: i for i, v in enumerate(att_ids)}
+    # attribute count, stats from training portion of genome data 
+    att_to_cnt = meta_info['att_to_cnt']
+    meta.attribute_cnts = [att_to_cnt[a["name"]] for a in sorted(meta_info["attributes"], 
+                                                                 key=lambda x: x["id"])]
+
+    
