@@ -364,7 +364,8 @@ class FastRCNNOutputsWithAttr(FastRCNNOutputs):
     def __init__(
         self, box2box_transform, 
         pred_class_logits, pred_proposal_deltas, pred_attr_logits,
-        proposals, smooth_l1_beta, attribute_loss_type
+        proposals, smooth_l1_beta, attribute_loss_type, attribute_loss_weight,
+        attribute_class_weights, attribute_sampling
     ):
         """
         Args:
@@ -389,6 +390,9 @@ class FastRCNNOutputsWithAttr(FastRCNNOutputs):
                 the smooth L1 loss function. When set to 0, the loss becomes L1. When
                 set to +inf, the loss becomes constant 0.
             attribute_loss_type: softmax or multiclass
+            attribute_loss_weight: [0, 1]
+            attribute_class_weights: weight on each attribute, exp(-alpha * sqrt(cnt) / max(sqrt(cnt))) 
+            attribute_sampling: uniform or expminus
         """
         # initialize everything from FastRCNNOutputs 
         super(FastRCNNOutputsWithAttr, self).__init__(
@@ -399,16 +403,14 @@ class FastRCNNOutputsWithAttr(FastRCNNOutputs):
         # initialize attribute part
         self.pred_attr_logits = pred_attr_logits  # strictly it is just scores.
         self.attribute_loss_type = attribute_loss_type
-
+        self.attribute_loss_weight = attribute_loss_weight
+        self.attribute_class_weights = attribute_class_weights
+        self.attribute_sampling = attribute_sampling  # uniform or expminus
         if proposals[0].has("gt_attributes"):
             """
             Each proposal's gt_attributes is [attr_id] with variable length.
             Convert each to be (num_attributes, ) with indices {0, 1}.
             """
-            # num_regions, num_attributes = pred_attr_logits.size()
-            # self.gt_attributes = self.gt_boxes.tensor.new_zeros(num_regions, num_attributes)
-            # for i, p in enumerate(proposals):
-            #     self.gt_attributes[i, p.gt_attributes] = 1.
             self.gt_attributes = cat([p.gt_attributes for p in proposals], dim=0)
 
     def softmax_attribute_loss(self):
@@ -418,29 +420,36 @@ class FastRCNNOutputsWithAttr(FastRCNNOutputs):
         """
         idx = self.gt_attributes.sum(1) > 0  # select those with attributes
         if self.pred_attr_logits[idx].numel() == 0:
-            # fake a meaningless loss to avoid unused params
+            # fake a meaningless loss to avoid unused params in forward
             loss = self.pred_attr_logits.sum() * 0
         else:
             pred = self.pred_attr_logits[idx].log_softmax(dim=-1)  # (r, num_attributes)
             tgt = self.gt_attributes[idx]        # (r, num_attributes)
             tgt = tgt / tgt.sum(1).unsqueeze(1)  # label smoothing
-            loss = torch.mean(torch.sum(-tgt * pred, dim=-1))
-        return loss
-    
+            if self.attribute_sampling == 'expminus':
+                loss = torch.mean(
+                        torch.sum(-tgt * pred * self.attribute_class_weights, dim=-1))
+            elif self.attribute_sampling == 'uniform':
+                loss = torch.mean(torch.sum(-tgt * pred, dim=-1))
+            else:
+                raise NotImplementedError
+        return self.attribute_loss_weight * loss
+
     def multi_class_attribute_loss(self):
         """
         Compute binary cross entropy loss on each attribute of each region.
         """
         idx = self.gt_attributes.sum(1) > 0  # selet those with attributes
         if self.pred_attr_logits[idx].numel() == 0:
-            # fake a meaningless loss to avoid unused params
+            # fake a meaningless loss to avoid unused params in forward
             loss = self.pred_attr_logits.sum() * 0
         else:
             pred = self.pred_attr_logits[idx]    # (r, num_attributes)
             tgt = self.gt_attributes[idx]        # (r, num_attributes)
-            loss = F.binary_cross_entropy_with_logits(pred, tgt, reduction='mean')
-        return loss
-    
+            loss = F.binary_cross_entropy_with_logits(pred, tgt, 
+                        self.attribute_class_weights, reduction='mean')
+        return self.attribute_loss_weight * loss
+
     def losses(self):
         losses = {
             "loss_cls": self.softmax_cross_entropy_loss(),
@@ -459,8 +468,8 @@ class FastRCNNOutputsWithAttr(FastRCNNOutputs):
             probs = F.softmax(self.pred_attr_logits, dim=-1)  # (R, num_attributes)
         elif self.attribute_loss_type == 'multiclass':
             probs = torch.sigmoid(self.pred_attr_logits)  # (R, num_attributes)
-        return probs.split(self.num_preds_per_images, dim=0)
-    
+        return probs.split(self.num_preds_per_image, dim=0)
+
     def inference(self, score_thresh, nms_thresh, topk_per_image):
         """
         Args:
@@ -496,7 +505,7 @@ class FastRCNNOutputLayersWithAttr(nn.Module):
     """
 
     def __init__(self, input_size, num_classes, cls_embedding_dim, 
-                       num_attributes, att_embedding_dim,
+                       num_attributes, attr_embedding_dim,
                        cls_agnostic_bbox_reg, box_dim=4):
         """
         Args:
@@ -519,8 +528,8 @@ class FastRCNNOutputLayersWithAttr(nn.Module):
 
         # Attribute branch
         self.cls_embed = nn.Linear(num_classes + 1, cls_embedding_dim)
-        self.att_embed = nn.Linear(input_size + cls_embedding_dim, att_embedding_dim)
-        self.att_score = nn.Linear(att_embedding_dim, num_attributes)
+        self.att_embed = nn.Linear(input_size + cls_embedding_dim, attr_embedding_dim)
+        self.att_score = nn.Linear(attr_embedding_dim, num_attributes)
 
         # initialize
         nn.init.normal_(self.cls_score.weight, std=0.01)
@@ -542,7 +551,7 @@ class FastRCNNOutputLayersWithAttr(nn.Module):
         # attribute branch
         cls_emb = self.cls_embed(scores.detach())  # forbid attribute branch effecting detection
         concat_pool5 = torch.cat([cls_emb, x], dim=-1)  # (n, input_size + cls_embedding_dim)
-        att_emb = self.att_embed(concat_pool5)  # (n, att_embedding_dim)
+        att_emb = self.att_embed(concat_pool5)  # (n, attr_embedding_dim)
         att_scores = self.att_score(F.relu(att_emb))  # (n, #attrs)
 
         # return

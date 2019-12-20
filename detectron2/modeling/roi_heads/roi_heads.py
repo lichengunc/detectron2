@@ -5,6 +5,7 @@ from typing import Dict
 import torch
 from torch import nn
 
+from detectron2.data import MetadataCatalog
 from detectron2.layers import ShapeSpec
 from detectron2.structures import Boxes, Instances, pairwise_iou
 from detectron2.utils.events import get_event_storage
@@ -729,13 +730,23 @@ class StandardROIHeadsWithAttr(StandardROIHeads):
         super(StandardROIHeadsWithAttr, self).__init__(cfg, input_shape)
         self.num_attributes = cfg.MODEL.ROI_HEADS.NUM_ATTRIBUTES
         self.cls_embedding_dim = cfg.MODEL.ROI_HEADS.CLASS_EMBEDDING_DIM
-        self.att_embedding_dim = cfg.MODEL.ROI_HEADS.ATTRIBUTE_EMBEDDING_DIM
-        self.att_loss_type = cfg.MODEL.ROI_HEADS.ATTRIBUTE_LOSS_TYPE
+        self.attr_embedding_dim = cfg.MODEL.ROI_HEADS.ATTRIBUTE_EMBEDDING_DIM
+        self.attr_loss_type = cfg.MODEL.ROI_HEADS.ATTRIBUTE_LOSS_TYPE
+        self.attr_loss_weight = cfg.MODEL.ROI_HEADS.ATTRIBUTE_LOSS_WEIGHT
+        self.attr_sampling = cfg.MODEL.ROI_HEADS.ATTRIBUTE_SAMPLING
+        
+        # compute attribute weights
+        metadata = MetadataCatalog.get(cfg.DATASETS.TRAIN[0])
+        attr_cnts = torch.sqrt(torch.Tensor(metadata.get("attribute_cnts")))
+        attr_alpha = cfg.MODEL.ROI_HEADS.ATTRIBUTE_ALPHA
+        attr_weights = torch.exp(-attr_alpha * attr_cnts / torch.max(attr_cnts))
+        self.attr_class_weights = attr_weights.to(torch.device(cfg.MODEL.DEVICE))
+
         # change box_predictor to be with attributes
         self.box_predictor = FastRCNNOutputLayersWithAttr(
             self.box_head.output_size, 
             self.num_classes, self.cls_embedding_dim,
-            self.num_attributes, self.att_embedding_dim,
+            self.num_attributes, self.attr_embedding_dim,
             self.cls_agnostic_bbox_reg
         )
 
@@ -791,7 +802,10 @@ class StandardROIHeadsWithAttr(StandardROIHeads):
             pred_attr_logits,
             proposals,
             self.smooth_l1_beta,
-            self.att_loss_type
+            self.attr_loss_type,
+            self.attr_loss_weight,
+            self.attr_class_weights,
+            self.attr_sampling
         )
         if self.training:
             return outputs.losses()
@@ -800,3 +814,47 @@ class StandardROIHeadsWithAttr(StandardROIHeads):
                 self.test_score_thresh, self.test_nms_thresh, self.test_detections_per_img
             )
             return pred_instances
+    
+    def _forward_attribute(self, features, instances):
+        """
+        Right now only attribute inference is supported.
+        For training, please check FastRCNNOutputsWithATTR
+        Args:
+            features: same as in `forward()`
+            instances (list[Instances]): instances to predict other outputs.
+        Returns:
+            instances (list[Instances])
+        """
+        assert not self.training
+        proposal_boxes = [x.pred_boxes for x in instances]
+        box_features = self.box_pooler(features, proposal_boxes)
+        box_features = self.box_head(box_features)
+        pred_class_logits, pred_proposal_deltas, pred_attr_logits = self.box_predictor(box_features)
+        del box_features
+
+        outputs = FastRCNNOutputsWithAttr(
+            self.box2box_transform,
+            pred_class_logits,
+            pred_proposal_deltas,
+            pred_attr_logits,
+            instances,  # input instances as the proposals
+            self.smooth_l1_beta,
+            self.attr_loss_type,
+            self.attr_loss_weight,
+            self.attr_class_weights,
+            self.attr_sampling
+        )
+
+        pred_attr_probs_list = outputs.predict_attr_probs()  # list [(num_preds_per_image, num_attributes)]
+        for probs, inst in zip(pred_attr_probs_list, instances): 
+            assert probs.shape[0] == len(inst)
+            inst.pred_attr_probs = probs
+        return instances
+
+    def forward_with_given_boxes(self, features, instances):
+        assert not self.training
+        assert instances[0].has("pred_boxes") and instances[0].has("pred_classes")
+        if not instances[0].has("pred_attr_probs"):
+            features = [features[f] for f in self.in_features]
+            instances = self._forward_attribute(features, instances)
+        return instances
