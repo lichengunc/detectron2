@@ -34,6 +34,7 @@ from detectron2.evaluation import (
     PascalVOCDetectionEvaluator,
     SemSegEvaluator,
     verify_results,
+    AttributeEvaluator,
 )
 from detectron2.modeling import GeneralizedRCNNWithTTA
 
@@ -68,7 +69,13 @@ class Trainer(DefaultTrainer):
                     output_dir=output_folder,
                 )
             )
-        if evaluator_type in ["coco", "coco_panoptic_seg", "genome"]:
+        if evaluator_type == "genome":
+            if cfg.TEST.EVAL_ATTRIBUTE:
+                evaluator_list.append(AttributeEvaluator(dataset_name, cfg, True, output_folder))
+            else:
+                output_folder += '_attribute'
+                evaluator_list.append(COCOEvaluator(dataset_name, cfg, True, output_folder))
+        if evaluator_type in ["coco", "coco_panoptic_seg"]:
             evaluator_list.append(COCOEvaluator(dataset_name, cfg, True, output_folder))
         if evaluator_type == "coco_panoptic_seg":
             evaluator_list.append(COCOPanopticEvaluator(dataset_name, output_folder))
@@ -116,8 +123,8 @@ def setup(args):
     cfg = get_cfg()
     cfg.merge_from_file(args.config_file)
     cfg.merge_from_list(args.opts)
-    cfg.freeze()
     default_setup(cfg, args)
+    cfg.freeze()
     return cfg
 
 
