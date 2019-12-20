@@ -268,6 +268,9 @@ _C.MODEL.ROI_HEADS.NUM_ATTRIBUTES = 400
 _C.MODEL.ROI_HEADS.CLASS_EMBEDDING_DIM = 256
 _C.MODEL.ROI_HEADS.ATTRIBUTE_EMBEDDING_DIM = 512
 _C.MODEL.ROI_HEADS.ATTRIBUTE_LOSS_TYPE = "softmax"  # or multiclass
+_C.MODEL.ROI_HEADS.ATTRIBUTE_LOSS_WEIGHT = 1.
+_C.MODEL.ROI_HEADS.ATTRIBUTE_SAMPLING = "expminus"  # expminus or uniform
+_C.MODEL.ROI_HEADS.ATTRIBUTE_ALPHA = 2.  # used for exp(-alpha * sqrt(cnt)/max(sqrt(cnt)))
 
 # ---------------------------------------------------------------------------- #
 # Box Head
@@ -542,6 +545,9 @@ _C.TEST.AUG.FLIP = True
 
 _C.TEST.PRECISE_BN = CN({"ENABLED": False})
 _C.TEST.PRECISE_BN.NUM_ITER = 200
+
+# evaluate attribute (only used for Genome)
+_C.TEST.EVAL_ATTRIBUTE = False
 
 # ---------------------------------------------------------------------------- #
 # Misc options
