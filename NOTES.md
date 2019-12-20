@@ -32,3 +32,8 @@ Finally make COCO-style annotations, ```filter``` controls if we want to filter 
 ``` 
 python tools/make_vg_instances.py --filter
 ```
+Also make meta.json for genome dataset, as we want to load the meta information during inference time.
+For meta information, we only run statistics on ```train``` portion.
+```
+python tools/make_vg_meta.py
+```
