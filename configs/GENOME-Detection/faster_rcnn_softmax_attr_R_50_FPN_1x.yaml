@@ -1,0 +1,16 @@
+_BASE_: "../Base-RCNN-FPN.yaml"
+MODEL:
+  WEIGHTS: "detectron2://ImageNetPretrained/MSRA/R-50.pkl"
+  MASK_ON: False
+  RESNETS:
+    DEPTH: 50
+  ROI_HEADS:
+    NAME: "StandardROIHeadsWithAttr"
+    NUM_CLASSES: 1600
+    NUM_ATTRIBUTES: 400
+    CLASS_EMBEDDING_DIM: 256
+    ATTRIBUTE_EMBEDDING_DIM: 512
+    ATTRIBUTE_LOSS_TYPE: "softmax" 
+DATASETS:
+  TRAIN: ("genome_train",)
+  TEST: ("genome_val",)
