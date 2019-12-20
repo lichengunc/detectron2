@@ -62,6 +62,7 @@ class DatasetMapper:
                 else cfg.DATASETS.PRECOMPUTED_PROPOSAL_TOPK_TEST
             )
         self.is_train = is_train
+        self.eval_attribute = cfg.TEST.EVAL_ATTRIBUTE
 
     def __call__(self, dataset_dict):
         """
@@ -108,7 +109,7 @@ class DatasetMapper:
                 dataset_dict, image_shape, transforms, self.min_box_side_len, self.proposal_topk
             )
 
-        if not self.is_train:
+        if not self.is_train and not self.eval_attribute:
             dataset_dict.pop("annotations", None)
             dataset_dict.pop("sem_seg_file_name", None)
             return dataset_dict
