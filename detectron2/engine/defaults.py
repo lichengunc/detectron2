@@ -60,6 +60,7 @@ def default_argument_parser():
         help="whether to attempt to resume from the checkpoint directory",
     )
     parser.add_argument("--eval-only", action="store_true", help="perform evaluation only")
+    parser.add_argument("--eval-attribute", action="store_true", help="perform attribute evaluation")
     parser.add_argument("--num-gpus", type=int, default=1, help="number of gpus *per machine*")
     parser.add_argument("--num-machines", type=int, default=1)
     parser.add_argument(
@@ -127,6 +128,10 @@ def default_setup(cfg, args):
     # typical validation set.
     if not (hasattr(args, "eval_only") and args.eval_only):
         torch.backends.cudnn.benchmark = cfg.CUDNN_BENCHMARK
+    
+    # evaluate attribute
+    if args.eval_attribute:
+        cfg.TEST.EVAL_ATTRIBUTE = True
 
 
 class DefaultPredictor:
