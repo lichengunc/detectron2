@@ -117,7 +117,23 @@ def inference_on_dataset(model, data_loader, evaluator):
                 total_compute_time = 0
 
             start_compute_time = time.time()
-            outputs = model(inputs)
+            if "attribute" in evaluator.__class__.__name__.lower():
+                # e.g., 
+                # we will use groundtruth boxes to predict attributes
+                # copy input instances to be predicted instances
+                # as we will use ground truth boxes to compute attributes
+                gt_instances_list = []
+                for input in inputs:
+                    gt_instances = input["instances"]
+                    gt_instances.pred_boxes = gt_instances.gt_boxes
+                    gt_instances.pred_classes = gt_instances.gt_classes
+                    gt_instances.proposal_boxes = gt_instances.gt_boxes
+                    gt_instances_list.append(gt_instances)
+                # forward with given boxes
+                outputs = model.inference(inputs, detected_instances=gt_instances_list)
+            else:
+                # normal model inference
+                outputs = model(inputs)
             torch.cuda.synchronize()
             total_compute_time += time.time() - start_compute_time
             evaluator.process(inputs, outputs)
