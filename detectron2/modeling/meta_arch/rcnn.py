@@ -122,6 +122,7 @@ class GeneralizedRCNN(nn.Module):
                 proposals = [x["proposals"].to(self.device) for x in batched_inputs]
 
             results, _ = self.roi_heads(images, features, proposals, None)
+            # results = self.roi_heads.detect_and_extract_features(features, proposals)
         else:
             detected_instances = [x.to(self.device) for x in detected_instances]
             results = self.roi_heads.forward_with_given_boxes(features, detected_instances)
@@ -138,6 +139,49 @@ class GeneralizedRCNN(nn.Module):
             return processed_results
         else:
             return results
+
+    def inference_with_features(self, batched_inputs, do_postprocess=True):
+        """
+        Run inference on the given inputs.
+
+        Args:
+            batched_inputs (list[dict]): same as in :meth:`forward`
+            do_postprocess (bool): whether to apply post-processing on the outputs.
+
+        Returns:
+            list[dict]:
+                Each dict is the output for one input image.
+                The dict contains one key "instances" whose value is a :class:`Instances`.
+                The :class:`Instances` object has the following keys:
+                    "pred_boxes", "pred_classes", "scores", "pred_masks", "pred_keypoints"
+            list[Tensor]:
+                Each tensor is the box features for one input image.
+        """
+        assert not self.training
+
+        images = self.preprocess_image(batched_inputs)
+        features = self.backbone(images.tensor)
+
+        if self.proposal_generator:
+            proposals, _ = self.proposal_generator(images, features, None)
+        else:
+            assert "proposals" in batched_inputs[0]
+            proposals = [x["proposals"].to(self.device) for x in batched_inputs]
+
+        results = self.roi_heads.detect_and_extract_features(features, proposals)
+
+        if do_postprocess:
+            processed_results = []
+            for results_per_image, input_per_image, image_size in zip(
+                results, batched_inputs, images.image_sizes
+            ):
+                height = input_per_image.get("height", image_size[0])
+                width = input_per_image.get("width", image_size[1])
+                r = detector_postprocess(results_per_image, height, width)
+                processed_results.append({"instances": r})
+            return processed_results
+        else:
+            return result 
 
     def preprocess_image(self, batched_inputs):
         """

@@ -489,8 +489,9 @@ class FastRCNNOutputsWithAttr(FastRCNNOutputs):
         pred_instances, kept_indices = fast_rcnn_inference(
             boxes, scores, image_shapes, score_thresh, nms_thresh, topk_per_image
         )
-        # let's add attr_probs to each pred_instances
+        # let's add probs and attr_probs to each pred_instances
         for i, pred_instance in enumerate(pred_instances):
+            pred_instance.pred_probs = scores[i][kept_indices[i]]
             pred_instance.pred_attr_probs = attr_probs[i][kept_indices[i]]
         # return
         return pred_instances, kept_indices
