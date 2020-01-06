@@ -12,8 +12,8 @@ MODEL:
     ATTRIBUTE_EMBEDDING_DIM: 512
     ATTRIBUTE_LOSS_TYPE: "softmax"  # or "multiclass"
 SOLVER:
-    STEPS: (210000, 250000)
-    MAX_ITER: 270000
+  STEPS: (210000, 250000)
+  MAX_ITER: 270000
 DATASETS:
   TRAIN: ("genome_train",)
   TEST: ("genome_val",)
