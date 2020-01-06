@@ -1,4 +1,6 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+import os
+import numpy as np
 import datetime
 import logging
 import time
@@ -118,16 +120,15 @@ def inference_on_dataset(model, data_loader, evaluator):
 
             start_compute_time = time.time()
             if "attribute" in evaluator.__class__.__name__.lower():
-                # e.g., 
-                # we will use groundtruth boxes to predict attributes
-                # copy input instances to be predicted instances
+                # When evaluating attributes, we will use groundtruth boxes to 
+                # predict attributes.
+                # Copy input instances to be predicted instances
                 # as we will use ground truth boxes to compute attributes
                 gt_instances_list = []
                 for input in inputs:
                     gt_instances = input["instances"]
                     gt_instances.pred_boxes = gt_instances.gt_boxes
                     gt_instances.pred_classes = gt_instances.gt_classes
-                    gt_instances.proposal_boxes = gt_instances.gt_boxes
                     gt_instances_list.append(gt_instances)
                 # forward with given boxes
                 outputs = model.inference(inputs, detected_instances=gt_instances_list)
@@ -172,6 +173,70 @@ def inference_on_dataset(model, data_loader, evaluator):
     if results is None:
         results = {}
     return results
+
+def extract_feats(model, data_loader, output_folder):
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+    num_devices = torch.distributed.get_world_size() if torch.distributed.is_initialized() else 1
+    logger = logging.getLogger(__name__)
+    logger.info("Start Feature Extraction on {} images".format(len(data_loader)))
+
+    total = len(data_loader)  # inference data loader must have a fixed length
+    
+    logging_interval = 50
+    num_warmup = min(5, logging_interval - 1, total - 1)
+    start_time = time.time()
+    total_compute_time = 0
+    with inference_context(model), torch.no_grad():
+        for idx, inputs in enumerate(data_loader):
+            if idx == num_warmup:
+                start_time = time.time()
+                total_compute_time = 0
+
+            start_compute_time = time.time()
+            outputs = model.inference_with_features(inputs)
+            torch.cuda.synchronize()
+            total_compute_time += time.time() - start_compute_time
+
+            # process (inputs, outputs)
+            for input, output in zip(inputs, outputs):
+                image_name = input["image_name"]
+                instances = output["instances"].to(torch.device("cpu"))
+                # save
+                np.savez(os.path.join(output_folder, image_name+'.npz'), 
+                         image_name=image_name,
+                         pred_boxes=instances.pred_boxes.tensor.numpy(),
+                         pred_probs=instances.pred_probs.numpy(), 
+                         pred_attr_probs=instances.pred_attr_probs.numpy(),
+                         box_feats=instances.box_feats.numpy())
+
+            if (idx + 1) % logging_interval == 0:
+                duration = time.time() - start_time
+                seconds_per_img = duration / (idx + 1 - num_warmup)
+                eta = datetime.timedelta(
+                    seconds=int(seconds_per_img * (total - num_warmup) - duration)
+                )
+                logger.info(
+                    "Feature extraction done {}/{}. {:.4f} s / img. ETA={}".format(
+                        idx + 1, total, seconds_per_img, str(eta)
+                    )
+                )
+
+    # Measure the time only for this worker (before the synchronization barrier)
+    total_time = int(time.time() - start_time)
+    total_time_str = str(datetime.timedelta(seconds=total_time))
+    # NOTE this format is parsed by grep
+    logger.info(
+        "Total feature extraction time: {} ({:.6f} s / img per device, on {} devices)".format(
+            total_time_str, total_time / (total - num_warmup), num_devices
+        )
+    )
+    total_compute_time_str = str(datetime.timedelta(seconds=int(total_compute_time)))
+    logger.info(
+        "Total feature extraction pure compute time: {} ({:.6f} s / img per device, on {} devices)".format(
+            total_compute_time_str, total_compute_time / (total - num_warmup), num_devices
+        )
+    )
 
 
 @contextmanager

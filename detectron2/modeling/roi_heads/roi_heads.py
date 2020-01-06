@@ -771,7 +771,7 @@ class StandardROIHeadsWithAttr(StandardROIHeads):
         else:
             pred_instances = self._forward_box(features_list, proposals)
             # During inference cascaded prediction is used: the mask and keypoints heads are only
-            # applied to the top scoring box detections.
+            # applied to the top scoring box detections
             pred_instances = self.forward_with_given_boxes(features, pred_instances)
             return pred_instances, {}
 
@@ -784,7 +784,7 @@ class StandardROIHeadsWithAttr(StandardROIHeads):
             proposals (list[Instances]): the per-image object proposals with
                 their matching ground truth.
                 Each has fields "proposal_boxes", and "objectness_logits",
-                "gt_classes", "gt_boxes".
+                "gt_classes", "gt_boxes", and maybe "gt_attributes".
 
         Returns:
             In training, a dict of losses.
@@ -814,23 +814,27 @@ class StandardROIHeadsWithAttr(StandardROIHeads):
                 self.test_score_thresh, self.test_nms_thresh, self.test_detections_per_img
             )
             return pred_instances
-    
-    def _forward_attribute(self, features, instances):
+
+    def forward_classes_attributes_given_boxes(self, features, instances):
         """
-        Right now only attribute inference is supported.
-        For training, please check FastRCNNOutputsWithATTR
+        Recompute everything (pred_probs, pred_attr_probs, box_feats) for given instances, 
+        even the given instances were already with those information.
+        Due to the refinement of boxes, we hypothesize that the re-computation might
+        return slightly more precised features/classes/attributes.
         Args:
             features: same as in `forward()`
             instances (list[Instances]): instances to predict other outputs.
         Returns:
-            instances (list[Instances])
+            instances (list[Instances]), with pred_probs, pred_attr_probs, box_feats
         """
         assert not self.training
+        # use pred_boxes as proposal_boxes
+        for inst in instances: 
+            inst.proposal_boxes = inst.pred_boxes
         proposal_boxes = [x.pred_boxes for x in instances]
         box_features = self.box_pooler(features, proposal_boxes)
         box_features = self.box_head(box_features)
         pred_class_logits, pred_proposal_deltas, pred_attr_logits = self.box_predictor(box_features)
-        del box_features
 
         outputs = FastRCNNOutputsWithAttr(
             self.box2box_transform,
@@ -845,16 +849,46 @@ class StandardROIHeadsWithAttr(StandardROIHeads):
             self.attr_sampling
         )
 
+        # compute box_features, attr_probs, probs for each image
+        num_preds_per_image = [len(inst) for inst in instances]  
+        box_features_list = box_features.split(num_preds_per_image, dim=0)  # list([Tensor])
         pred_attr_probs_list = outputs.predict_attr_probs()  # list [(num_preds_per_image, num_attributes)]
-        for probs, inst in zip(pred_attr_probs_list, instances): 
-            assert probs.shape[0] == len(inst)
-            inst.pred_attr_probs = probs
+        pred_probs_list = outputs.predict_probs()  # list [(num_preds_per_image, num_objects)]
+        for inst, pred_probs, pred_attr_probs, box_feats in \
+            zip(instances, pred_probs_list, pred_attr_probs_list, box_features_list):
+            assert pred_probs.shape[0] == pred_attr_probs.shape[0] == \
+                    box_feats.shape[0] == len(inst)
+            # re-assign new pred_probs, pred_attr_probs, and box_feats
+            inst.pred_probs = pred_probs
+            inst.pred_attr_probs = pred_attr_probs
+            inst.box_feats = box_feats
+        return instances 
+
+    def forward_features_given_boxes(self, features, instances):
+        """
+        We only compute features for given predicted boxes.
+        """
+        assert not self.training
+        # use pred_boxes as proposal_boxes
+        for inst in instances: 
+            inst.proposal_boxes = inst.pred_boxes
+        proposal_boxes = [x.pred_boxes for x in instances]
+        box_features = self.box_pooler(features, proposal_boxes)
+        box_features = self.box_head(box_features) 
+        # compute box_features, attr_probs, probs for each image
+        num_preds_per_image = [len(inst) for inst in instances]  
+        box_features_list = box_features.split(num_preds_per_image, dim=0)  # list([Tensor])
+        for inst, box_feats in zip(instances, box_features_list):
+            inst.box_feats = box_feats
         return instances
 
-    def forward_with_given_boxes(self, features, instances):
-        assert not self.training
-        assert instances[0].has("pred_boxes") and instances[0].has("pred_classes")
-        if not instances[0].has("pred_attr_probs"):
-            features = [features[f] for f in self.in_features]
-            instances = self._forward_attribute(features, instances)
-        return instances
+    def detect_and_extract_features(self, features, proposals):
+        """
+        Returns:
+            instances (list[Instances])
+            box_features (list[Tensor])
+        """
+        features_list = [features[f] for f in self.in_features]
+        pred_instances = self._forward_box(features_list, proposals)
+        pred_instances = self.forward_features_given_boxes(features_list, pred_instances)
+        return pred_instances
