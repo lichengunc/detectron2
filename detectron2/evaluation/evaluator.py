@@ -203,12 +203,16 @@ def extract_feats(model, data_loader, output_folder):
                 image_name = input["image_name"]
                 instances = output["instances"].to(torch.device("cpu"))
                 # save
+                norm_bb = np.copy(instances.pred_boxes.tensor.numpy())
+                norm_bb[:, 0::2] = norm_bb[:, 0::2] / instances.image_size[1]  # x1x2, width
+                norm_bb[:, 1::2] = norm_bb[:, 1::2] / instances.image_size[0]  # y1y2, height
                 np.savez(os.path.join(output_folder, image_name+'.npz'), 
                          image_name=image_name,
-                         pred_boxes=instances.pred_boxes.tensor.numpy(),
-                         pred_probs=instances.pred_probs.numpy(), 
-                         pred_attr_probs=instances.pred_attr_probs.numpy(),
-                         box_feats=instances.box_feats.numpy())
+                         features=instances.box_feats.numpy(),  # (R, k)
+                         norm_bb=norm_bb,  # (R, 4) xyxy
+                         pred_probs=instances.pred_probs.numpy(), # (R, 1601)
+                         pred_attr_probs=instances.pred_attr_probs.numpy()  # (R, 400)
+                        )
 
             if (idx + 1) % logging_interval == 0:
                 duration = time.time() - start_time
