@@ -337,10 +337,11 @@ class Visualizer:
         labels = _create_text_labels(classes, scores, self.metadata.get("thing_classes", None))
         keypoints = predictions.pred_keypoints if predictions.has("pred_keypoints") else None
         if predictions.has("pred_attr_probs"):
-            attr_scores, attr_classes = predictions.pred_attr_probs.max(1)
-            attr_labels = [self.metadata.get("attribute_classes")[i] for i in attr_classes]
-            for i, (attr_label, attr_score) in enumerate(zip(attr_labels, attr_scores)):
-                labels[i] += ", {} {:.0f}%".format(attr_label, attr_score * 100)
+            if predictions.pred_attr_probs.nelement() > 0:
+                attr_scores, attr_classes = predictions.pred_attr_probs.max(1)
+                attr_labels = [self.metadata.get("attribute_classes")[i] for i in attr_classes]
+                for i, (attr_label, attr_score) in enumerate(zip(attr_labels, attr_scores)):
+                    labels[i] += ", {} {:.0f}%".format(attr_label, attr_score * 100)
 
         if predictions.has("pred_masks"):
             masks = np.asarray(predictions.pred_masks)
