@@ -138,6 +138,7 @@ class ROIHeads(torch.nn.Module):
         self.test_score_thresh        = cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST
         self.test_nms_thresh          = cfg.MODEL.ROI_HEADS.NMS_THRESH_TEST
         self.test_detections_per_img  = cfg.TEST.DETECTIONS_PER_IMAGE
+        self.enforce_topk             = cfg.TEST.ENFORCE_TOPK_DETECTIONS
         self.in_features              = cfg.MODEL.ROI_HEADS.IN_FEATURES
         self.num_classes              = cfg.MODEL.ROI_HEADS.NUM_CLASSES
         self.proposal_append_gt       = cfg.MODEL.ROI_HEADS.PROPOSAL_APPEND_GT
@@ -811,7 +812,8 @@ class StandardROIHeadsWithAttr(StandardROIHeads):
             return outputs.losses()
         else:
             pred_instances, _ = outputs.inference(
-                self.test_score_thresh, self.test_nms_thresh, self.test_detections_per_img
+                self.test_score_thresh, self.test_nms_thresh, 
+                self.test_detections_per_img, self.enforce_topk
             )
             return pred_instances
 

@@ -62,8 +62,11 @@ def setup(args):
     """
     cfg = get_cfg()
     cfg.merge_from_file(args.config_file)
-    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = args.score_thresh
     cfg.MODEL.WEIGHTS = args.model_weights
+    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = args.score_thresh
+    cfg.MODEL.ROI_HEADS.NMS_THRESH_TEST = args.nms_thresh
+    cfg.TEST.DETECTIONS_PER_IMAGE = args.num_detections
+    cfg.TEST.ENFORCE_TOPK_DETECTIONS = args.enforce_topk
     default_setup(cfg, args)
     cfg.freeze()
     return cfg
@@ -123,8 +126,17 @@ if __name__ == '__main__':
                         default="output/genome_faster_rcnn_softmax0.5_expminus_attr_R_101_FPN_3x/model_final.pth",
                         help="path to final model")
     parser.add_argument("--score-thresh", type=float, 
-                        default=0.25, 
+                        default=0.20, 
                         help="Used in ROI_HEADS")
+    parser.add_argument("--nms-thresh", type=float,
+                        default=0.50,
+                        help="Used in ROI_HEADS")
+    parser.add_argument("--num_detections", type=int,
+                        default=100,
+                        help="maximum detections per image")
+    parser.add_argument("--enforce-topk",
+                        action="store_true",
+                        help="enfoce outputing top-k detections per image")
     parser.add_argument("--num-gpus", type=int, 
                         default=8, help="number of gpus *per machine*")
     parser.add_argument("--num-machines", type=int, 
