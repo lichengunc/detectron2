@@ -208,10 +208,12 @@ def extract_feats(model, data_loader, output_folder):
                 norm_bb[:, 1::2] = norm_bb[:, 1::2] / instances.image_size[0]  # y1y2, height
                 np.savez(os.path.join(output_folder, image_name+'.npz'), 
                          image_name=image_name,
-                         features=instances.box_feats.numpy(),  # (R, k)
+                         image_w=instances.image_size[1],
+                         image_h=instances.image_size[0],
+                         box_feats=instances.box_feats.numpy(),  # (R, k)
                          norm_bb=norm_bb,  # (R, 4) xyxy
-                         pred_probs=instances.pred_probs.numpy(), # (R, 1601)
-                         pred_attr_probs=instances.pred_attr_probs.numpy()  # (R, 400)
+                         obj_probs=instances.pred_probs.numpy(), # (R, 1601)
+                         attr_probs=instances.pred_attr_probs.numpy()  # (R, 400)
                         )
 
             if (idx + 1) % logging_interval == 0:
