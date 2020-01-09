@@ -39,7 +39,7 @@ Naming convention:
 """
 
 
-def fast_rcnn_inference(boxes, scores, image_shapes, score_thresh, nms_thresh, topk_per_image, enforce_topk=False):
+def fast_rcnn_inference(boxes, scores, image_shapes, score_thresh, nms_thresh, topk_per_image, mink_per_image=-1, enforce_topk=False):
     """
     Call `fast_rcnn_inference_single_image` for all images.
 
@@ -68,7 +68,7 @@ def fast_rcnn_inference(boxes, scores, image_shapes, score_thresh, nms_thresh, t
     """
     result_per_image = [
         fast_rcnn_inference_single_image(
-            boxes_per_image, scores_per_image, image_shape, score_thresh, nms_thresh, topk_per_image, enforce_topk
+            boxes_per_image, scores_per_image, image_shape, score_thresh, nms_thresh, topk_per_image, mink_per_image, enforce_topk
         )
         for scores_per_image, boxes_per_image, image_shape in zip(scores, boxes, image_shapes)
     ]
@@ -76,7 +76,7 @@ def fast_rcnn_inference(boxes, scores, image_shapes, score_thresh, nms_thresh, t
 
 
 def fast_rcnn_inference_single_image(
-    boxes, scores, image_shape, score_thresh, nms_thresh, topk_per_image, enforce_topk=False
+    in_boxes, in_scores, image_shape, score_thresh, nms_thresh, topk_per_image, mink_per_image=-1, enforce_topk=False
 ):
     """
     Single-image inference. Return bounding-box detection results by thresholding
@@ -93,12 +93,12 @@ def fast_rcnn_inference_single_image(
     # where it may still be fewer than topk but let's just return.
     if enforce_topk:
         return fast_rcnn_inference_single_image(
-            boxes, scores, image_shape, 0.05, nms_thresh, topk_per_image)
+            in_boxes, in_scores, image_shape, 0.05, nms_thresh, topk_per_image)
 
-    scores = scores[:, :-1]
-    num_bbox_reg_classes = boxes.shape[1] // 4
+    scores = in_scores[:, :-1]
+    num_bbox_reg_classes = in_boxes.shape[1] // 4
     # Convert to Boxes to use the `clip` function ...
-    boxes = Boxes(boxes.reshape(-1, 4))
+    boxes = Boxes(in_boxes.reshape(-1, 4))
     boxes.clip(image_shape)
     boxes = boxes.tensor.view(-1, num_bbox_reg_classes, 4)  # R x C x 4
 
@@ -118,6 +118,11 @@ def fast_rcnn_inference_single_image(
     if topk_per_image >= 0:
         keep = keep[:topk_per_image]
     boxes, scores, filter_inds = boxes[keep], scores[keep], filter_inds[keep]
+
+    # Re-run if fewer than mink_per_image, we use conf_thresh=0.05 to get mink detections
+    if boxes.shape[0] < mink_per_image:
+        return fast_rcnn_inference_single_image(
+            in_boxes, in_scores, image_shape, 0.05, nms_thresh, mink_per_image)
 
     result = Instances(image_shape)
     result.pred_boxes = Boxes(boxes)
@@ -477,12 +482,13 @@ class FastRCNNOutputsWithAttr(FastRCNNOutputs):
             probs = torch.sigmoid(self.pred_attr_logits)  # (R, num_attributes)
         return probs.split(self.num_preds_per_image, dim=0)
 
-    def inference(self, score_thresh, nms_thresh, topk_per_image, enforce_topk=False):
+    def inference(self, score_thresh, nms_thresh, topk_per_image, mink_per_image, enforce_topk=False):
         """
         Args:
             score_thresh (float): same as fast_rcnn_inference.
             nms_thresh (float): same as fast_rcnn_inference.
             topk_per_image (int): same as fast_rcnn_inference.
+            mink_per_image (int): used for detecting at least mink objects.
             enforce_topk (bool): must return topk predictions
         Returns:
             list[Instances]: same as fast_rcnn_inference.
@@ -495,7 +501,8 @@ class FastRCNNOutputsWithAttr(FastRCNNOutputs):
 
         # the returned pred_instances are w/o attribute prediction
         pred_instances, kept_indices = fast_rcnn_inference(
-            boxes, scores, image_shapes, score_thresh, nms_thresh, topk_per_image, enforce_topk
+            boxes, scores, image_shapes, score_thresh, nms_thresh, 
+            topk_per_image, mink_per_image, enforce_topk
         )
         # let's add probs and attr_probs to each pred_instances
         for i, pred_instance in enumerate(pred_instances):
