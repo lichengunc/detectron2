@@ -65,7 +65,8 @@ def setup(args):
     cfg.MODEL.WEIGHTS = args.model_weights
     cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = args.score_thresh
     cfg.MODEL.ROI_HEADS.NMS_THRESH_TEST = args.nms_thresh
-    cfg.TEST.DETECTIONS_PER_IMAGE = args.num_detections
+    cfg.TEST.DETECTIONS_PER_IMAGE = args.max_detections
+    cfg.TEST.MIN_DETECTIONS_PER_IMAGE = args.min_detections
     cfg.TEST.ENFORCE_TOPK_DETECTIONS = args.enforce_topk
     default_setup(cfg, args)
     cfg.freeze()
@@ -75,9 +76,14 @@ def get_dataset_dicts(args):
     assert osp.isdir(args.image_root), f"{args.image_root} does not exist."
     dataset_dicts = []
     for f in os.listdir(args.image_root):
+        if osp.exists(osp.join(args.output_dir, 'features', f+'.npz')):
+            # TODO: this strategy is in case some process was dead, then
+            # we just re-run this code again by avoiding extracting features
+            # on existing image files.
+            continue
         record = {}
         record["file_name"] = osp.join(args.image_root, f)
-        record["image_name"] = ''.join(f.split('.')[:-1])
+        record["image_name"] = f 
         dataset_dicts.append(record)
     return dataset_dicts
 
@@ -129,11 +135,14 @@ if __name__ == '__main__':
                         default=0.20, 
                         help="Used in ROI_HEADS")
     parser.add_argument("--nms-thresh", type=float,
-                        default=0.50,
+                        default=0.30,
                         help="Used in ROI_HEADS")
-    parser.add_argument("--num_detections", type=int,
+    parser.add_argument("--max-detections", type=int,
                         default=100,
                         help="maximum detections per image")
+    parser.add_argument("--min-detections", type=int,
+                        default=10,
+                        help="minimum detections per image")
     parser.add_argument("--enforce-topk",
                         action="store_true",
                         help="enfoce outputing top-k detections per image")
