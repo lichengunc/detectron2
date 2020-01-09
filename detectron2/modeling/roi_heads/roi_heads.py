@@ -138,6 +138,7 @@ class ROIHeads(torch.nn.Module):
         self.test_score_thresh        = cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST
         self.test_nms_thresh          = cfg.MODEL.ROI_HEADS.NMS_THRESH_TEST
         self.test_detections_per_img  = cfg.TEST.DETECTIONS_PER_IMAGE
+        self.test_min_detections_per_img = cfg.TEST.MIN_DETECTIONS_PER_IMAGE
         self.enforce_topk             = cfg.TEST.ENFORCE_TOPK_DETECTIONS
         self.in_features              = cfg.MODEL.ROI_HEADS.IN_FEATURES
         self.num_classes              = cfg.MODEL.ROI_HEADS.NUM_CLASSES
@@ -813,7 +814,8 @@ class StandardROIHeadsWithAttr(StandardROIHeads):
         else:
             pred_instances, _ = outputs.inference(
                 self.test_score_thresh, self.test_nms_thresh, 
-                self.test_detections_per_img, self.enforce_topk
+                self.test_detections_per_img, self.test_min_detections_per_img, 
+                self.enforce_topk
             )
             return pred_instances
 
@@ -893,4 +895,147 @@ class StandardROIHeadsWithAttr(StandardROIHeads):
         features_list = [features[f] for f in self.in_features]
         pred_instances = self._forward_box(features_list, proposals)
         pred_instances = self.forward_features_given_boxes(features_list, pred_instances)
+        return pred_instances
+
+
+@ROI_HEADS_REGISTRY.register()
+class Res5ROIHeadsWithAttr(Res5ROIHeads):
+    """
+    Res5ROIHeads + Attribute Prediction
+    """
+
+    def __init__(self, cfg, input_shape):
+        super(Res5ROIHeadsWithAttr, self).__init__(cfg, input_shape)
+        self.num_attributes = cfg.MODEL.ROI_HEADS.NUM_ATTRIBUTES
+        self.cls_embedding_dim = cfg.MODEL.ROI_HEADS.CLASS_EMBEDDING_DIM
+        self.attr_embedding_dim = cfg.MODEL.ROI_HEADS.ATTRIBUTE_EMBEDDING_DIM
+        self.attr_loss_type = cfg.MODEL.ROI_HEADS.ATTRIBUTE_LOSS_TYPE
+        self.attr_loss_weight = cfg.MODEL.ROI_HEADS.ATTRIBUTE_LOSS_WEIGHT
+        self.attr_sampling = cfg.MODEL.ROI_HEADS.ATTRIBUTE_SAMPLING
+
+        # compute attribute weights
+        metadata = MetadataCatalog.get(cfg.DATASETS.TRAIN[0])
+        attr_cnts = torch.sqrt(torch.Tensor(metadata.get("attribute_cnts")))
+        attr_alpha = cfg.MODEL.ROI_HEADS.ATTRIBUTE_ALPHA
+        attr_weights = torch.exp(-attr_alpha * attr_cnts / torch.max(attr_cnts))
+        self.attr_class_weights = attr_weights.to(torch.device(cfg.MODEL.DEVICE))
+
+        # change box_predictor to be with attributes
+        self.res5, out_channels = self._build_res5_block(cfg)
+        self.box_predictor = FastRCNNOutputLayersWithAttr(
+            out_channels, 
+            self.num_classes, self.cls_embedding_dim,
+            self.num_attributes, self.attr_embedding_dim,
+            self.cls_agnostic_bbox_reg
+        )
+
+    def forward(self, images, features, proposals, targets=None):
+        """
+        See :class:`ROIHeads.forward`.
+        """
+        del images
+
+        if self.training:
+            proposals = self.label_and_sample_proposals(proposals, targets)
+        del targets
+
+        proposal_boxes = [x.proposal_boxes for x in proposals]
+        box_features = self._shared_roi_transform(
+            [features[f] for f in self.in_features], proposal_boxes
+        )
+        feature_pooled = box_features.mean(dim=[2, 3])  # pooled to 1x1
+        pred_class_logits, pred_proposal_deltas, pred_attr_logits = self.box_predictor(feature_pooled)
+        del feature_pooled
+
+        outputs = FastRCNNOutputsWithAttr(
+            self.box2box_transform,
+            pred_class_logits,
+            pred_proposal_deltas,
+            pred_attr_logits,
+            proposals,
+            self.smooth_l1_beta,
+            self.attr_loss_type,
+            self.attr_loss_weight,
+            self.attr_class_weights,
+            self.attr_sampling
+        )
+
+        if self.training:
+            del features
+            losses = outputs.losses()
+            if self.mask_on:
+                proposals, fg_selection_masks = select_foreground_proposals(
+                    proposals, self.num_classes
+                )
+                # Since the ROI feature transform is shared between boxes and masks,
+                # we don't need to recompute features. The mask loss is only defined
+                # on foreground proposals, so we need to select out the foreground
+                # features.
+                mask_features = box_features[torch.cat(fg_selection_masks, dim=0)]
+                del box_features
+                mask_logits = self.mask_head(mask_features)
+                losses["loss_mask"] = mask_rcnn_loss(mask_logits, proposals)
+            return [], losses
+        else:
+            pred_instances, _ = outputs.inference(
+                self.test_score_thresh, self.test_nms_thresh, 
+                self.test_detections_per_img, self.test_min_detections_per_img, 
+                self.enforce_topk
+            )
+            return pred_instances, {}
+
+    def forward_features_given_boxes(self, features, instances):
+        """
+        We only compute features for given predicted boxes.
+        """
+        assert not self.training
+        # use pred_boxes as proposal_boxes
+        for inst in instances:
+            inst.proposal_boxes = inst.pred_boxes
+        proposal_boxes = [x.pred_boxes for x in instances]
+        box_features = self._shared_roi_transform(
+            [features[f] for f in self.in_features], proposal_boxes
+        )
+        box_features = box_features.mean(dim=[2, 3])  # pooled to 1x1
+        # compute box_features, attr_probs, probs for each image
+        num_preds_per_image = [len(inst) for inst in instances]  
+        box_features_list = box_features.split(num_preds_per_image, dim=0)  # list([Tensor])
+        for inst, box_feats in zip(instances, box_features_list):
+            inst.box_feats = box_feats
+        return instances
+
+    def detect_and_extract_features(self, features, proposals):
+        """
+        Returns:
+            instances (list[Instances])
+            box_features (list[Tensor])
+        """
+        proposal_boxes = [x.proposal_boxes for x in proposals]
+        box_features = self._shared_roi_transform(
+            [features[f] for f in self.in_features], proposal_boxes
+        )
+        feature_pooled = box_features.mean(dim=[2, 3])  # pooled to 1x1
+        pred_class_logits, pred_proposal_deltas, pred_attr_logits = self.box_predictor(feature_pooled)
+        del feature_pooled
+
+        outputs = FastRCNNOutputsWithAttr(
+            self.box2box_transform,
+            pred_class_logits,
+            pred_proposal_deltas,
+            pred_attr_logits,
+            proposals,
+            self.smooth_l1_beta,
+            self.attr_loss_type,
+            self.attr_loss_weight,
+            self.attr_class_weights,
+            self.attr_sampling
+        )
+        # predict obj, attr, box 
+        pred_instances, _ = outputs.inference(self.test_score_thresh, 
+                                              self.test_nms_thresh, 
+                                              self.test_detections_per_img, 
+                                              self.test_min_detections_per_img, 
+                                              self.enforce_top)
+        # refine box_feats
+        pred_instances = self.forward_features_given_boxes(features, pred_instances)
         return pred_instances
