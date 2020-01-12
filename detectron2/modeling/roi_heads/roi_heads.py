@@ -836,6 +836,7 @@ class StandardROIHeadsWithAttr(StandardROIHeads):
         for inst in instances: 
             inst.proposal_boxes = inst.pred_boxes
         proposal_boxes = [x.pred_boxes for x in instances]
+        features = [features[f] for f in self.in_features]  # features -> features_list
         box_features = self.box_pooler(features, proposal_boxes)
         box_features = self.box_head(box_features)
         pred_class_logits, pred_proposal_deltas, pred_attr_logits = self.box_predictor(box_features)
@@ -1035,7 +1036,58 @@ class Res5ROIHeadsWithAttr(Res5ROIHeads):
                                               self.test_nms_thresh, 
                                               self.test_detections_per_img, 
                                               self.test_min_detections_per_img, 
-                                              self.enforce_top)
+                                              self.enforce_topk)
         # refine box_feats
         pred_instances = self.forward_features_given_boxes(features, pred_instances)
         return pred_instances
+
+    def forward_classes_attributes_given_boxes(self, features, instances):
+        """
+        Recompute everything (pred_probs, pred_attr_probs, box_feats) for given instances, 
+        even the given instances were already with those information.
+        Due to the refinement of boxes, we hypothesize that the re-computation might
+        return slightly more precised features/classes/attributes.
+        Args:
+            features: same as in `forward()`
+            instances (list[Instances]): instances to predict other outputs.
+        Returns:
+            instances (list[Instances]), with pred_probs, pred_attr_probs, box_feats
+        """
+        assert not self.training
+        # use pred_boxes as proposal_boxes
+        for inst in instances:
+            inst.proposal_boxes = inst.pred_boxes
+        proposal_boxes = [x.pred_boxes for x in instances]
+        box_features = self._shared_roi_transform(
+            [features[f] for f in self.in_features], proposal_boxes
+        )
+        feature_pooled = box_features.mean(dim=[2, 3])  # pooled to 1x1
+        pred_class_logits, pred_proposal_deltas, pred_attr_logits = self.box_predictor(feature_pooled)
+
+        outputs = FastRCNNOutputsWithAttr(
+            self.box2box_transform,
+            pred_class_logits,
+            pred_proposal_deltas,
+            pred_attr_logits,
+            instances,  # input instances as the proposals
+            self.smooth_l1_beta,
+            self.attr_loss_type,
+            self.attr_loss_weight,
+            self.attr_class_weights,
+            self.attr_sampling
+        )
+
+        # compute box_features, attr_probs, probs for each image
+        num_preds_per_image = [len(inst) for inst in instances]  
+        box_features_list = feature_pooled.split(num_preds_per_image, dim=0)  # list([Tensor])
+        pred_attr_probs_list = outputs.predict_attr_probs()  # list [(num_preds_per_image, num_attributes)]
+        pred_probs_list = outputs.predict_probs()  # list [(num_preds_per_image, num_objects)]
+        for inst, pred_probs, pred_attr_probs, box_feats in \
+            zip(instances, pred_probs_list, pred_attr_probs_list, box_features_list):
+            assert pred_probs.shape[0] == pred_attr_probs.shape[0] == \
+                    box_feats.shape[0] == len(inst)
+            # re-assign new pred_probs, pred_attr_probs, and box_feats
+            inst.pred_probs = pred_probs
+            inst.pred_attr_probs = pred_attr_probs
+            inst.box_feats = box_feats
+        return instances
