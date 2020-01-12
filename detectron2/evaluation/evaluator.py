@@ -131,7 +131,8 @@ def inference_on_dataset(model, data_loader, evaluator):
                     gt_instances.pred_classes = gt_instances.gt_classes
                     gt_instances_list.append(gt_instances)
                 # forward with given boxes
-                outputs = model.inference(inputs, detected_instances=gt_instances_list)
+                outputs = model.inference(inputs, detected_instances=gt_instances_list, 
+                                                  eval_attribute=True)
             else:
                 # normal model inference
                 outputs = model(inputs)

@@ -92,7 +92,7 @@ class GeneralizedRCNN(nn.Module):
         losses.update(proposal_losses)
         return losses
 
-    def inference(self, batched_inputs, detected_instances=None, do_postprocess=True):
+    def inference(self, batched_inputs, detected_instances=None, do_postprocess=True, eval_attribute=False):
         """
         Run inference on the given inputs.
 
@@ -126,6 +126,9 @@ class GeneralizedRCNN(nn.Module):
         else:
             detected_instances = [x.to(self.device) for x in detected_instances]
             results = self.roi_heads.forward_with_given_boxes(features, detected_instances)
+            if eval_attribute:
+                results = self.roi_heads.forward_classes_attributes_given_boxes(
+                                features, detected_instances)
 
         if do_postprocess:
             processed_results = []
