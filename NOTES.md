@@ -82,3 +82,6 @@ Here, I list the C4 results for reference.
 | Res101-C4 (nms0.50_conf0.20_max100_min10)  | 67.67 |
 | Res101-C4 (nms0.50_conf0.10_max100_min10)  | 67.xx |
 </td></tr> </table>
+
+## Download
+Download the pre-trained Res101-FPN and Res101-C4 models from [here](http://vision.cs.unc.edu/licheng/websites/detectron2/).
