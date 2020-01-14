@@ -175,7 +175,7 @@ def inference_on_dataset(model, data_loader, evaluator):
         results = {}
     return results
 
-def extract_feats(model, data_loader, output_folder):
+def extract_feats(model, data_loader, output_folder, given_boxes=False):
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
     num_devices = torch.distributed.get_world_size() if torch.distributed.is_initialized() else 1
@@ -195,7 +195,14 @@ def extract_feats(model, data_loader, output_folder):
                 total_compute_time = 0
 
             start_compute_time = time.time()
-            outputs = model.inference_with_features(inputs)
+            gt_instances_list = None
+            if given_boxes:
+                gt_instances_list = []
+                for input in inputs:
+                    gt_instances = input["instances"]
+                    gt_instances.pred_boxes = gt_instances.gt_boxes
+                    gt_instances_list.append(gt_instances)
+            outputs = model.inference_with_features(inputs, gt_instances_list)
             torch.cuda.synchronize()
             total_compute_time += time.time() - start_compute_time
 

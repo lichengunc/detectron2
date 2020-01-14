@@ -143,7 +143,7 @@ class GeneralizedRCNN(nn.Module):
         else:
             return results
 
-    def inference_with_features(self, batched_inputs, do_postprocess=True):
+    def inference_with_features(self, batched_inputs, detected_instances=None, do_postprocess=True):
         """
         Run inference on the given inputs.
 
@@ -165,13 +165,21 @@ class GeneralizedRCNN(nn.Module):
         images = self.preprocess_image(batched_inputs)
         features = self.backbone(images.tensor)
 
-        if self.proposal_generator:
-            proposals, _ = self.proposal_generator(images, features, None)
+        if detected_instances is None:
+            if self.proposal_generator:
+                proposals, _ = self.proposal_generator(images, features, None)
+            else:
+                assert "proposals" in batched_inputs[0]
+                proposals = [x["proposals"].to(self.device) for x in batched_inputs]
+            # run detection (pred_probs, pred_attr_probs, pred_boxes) then extract box_feats
+            results = self.roi_heads.detect_and_extract_features(features, proposals)
         else:
-            assert "proposals" in batched_inputs[0]
-            proposals = [x["proposals"].to(self.device) for x in batched_inputs]
-
-        results = self.roi_heads.detect_and_extract_features(features, proposals)
+            detected_instances = [x.to(self.device) for x in detected_instances]
+            # masks and keypoints given pred_boxes
+            # results = self.roi_heads.forward_with_given_boxes(features, detected_instances)
+            # pred_probs, pred_attr_probs, box_feats given pred_boxes
+            results = self.roi_heads.forward_classes_attributes_given_boxes(
+                                                    features, detected_instances)
 
         if do_postprocess:
             processed_results = []
