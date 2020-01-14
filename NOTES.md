@@ -44,6 +44,10 @@ It trains ResNet-101 C4 for 1600 object classes and 400 attribute classes, with 
 - Run ```./experiments/evaluate_c4_feats.sh``` to extract all COCO images' features
 and use [mcan-vqa](https://github.com/MILVLG/mcan-vqa) to test the performance.
 
+## Feature Extraction
+- ```tools/extract_feats.py```: Extract _box_feats_, _pred_probs_, _pred_attr_probs_, _norm_bb_ for each image.
+- ```tools/extract_feats_given_boxes.py```: Extract _box_feats_, _pred_probs_, _pred_attr_probs_, _norm_bb_ for each image given boxes.
+
 ## Some Ipython Notebooks to Check Results
 - ```check_vg_data.ipynb```: check statistics of VG data.
 - ```run_attr_inference.ipynb```: run attr+obj detection together and visualize the results.
@@ -80,7 +84,7 @@ Here, I list the C4 results for reference.
 | Res101-C4 (nms0.30_conf0.15_max100_min10)  | 67.73 |
 | Res101-C4 (nms0.30_conf0.10_max100_min10)  | 67.86 |
 | Res101-C4 (nms0.50_conf0.20_max100_min10)  | 67.67 |
-| Res101-C4 (nms0.50_conf0.10_max100_min10)  | 67.xx |
+| Res101-C4 (nms0.50_conf0.10_max100_min10)  | 68.10 |
 </td></tr> </table>
 
 ## Download
