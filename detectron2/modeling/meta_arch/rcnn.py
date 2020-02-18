@@ -192,7 +192,7 @@ class GeneralizedRCNN(nn.Module):
                 processed_results.append({"instances": r})
             return processed_results
         else:
-            return result 
+            return results
 
     def preprocess_image(self, batched_inputs):
         """
